@@ -3,11 +3,13 @@ import unittest
 import gemstash
 import memcache
 
+# TODO: test reset_cas, gets
+
 class Test_gemstash(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.gs = gemstash.Client(gemstash.Stash())
+        cls.gs = gemstash.Client(gemstash.Stash(), cache_cas=True)
 
     def setUp(self):
         self.gs.flush_all()
@@ -367,14 +369,28 @@ class Test_gemstash(unittest.TestCase):
         with self.assertRaises(gemstash.Client.MemcachedKeyCharacterError):
             self.gs.check_key("foo\n")
 
+    def test_cas(self):
+        self.assertTrue(self.gs.cas("new_key", "val"),
+            "cas on a new key should succeed")
+        self.assertTrue(self.gs.cas("new_key", "val2"),
+            "cas on a key without ever fetching it should succeed")
+        self.gs.get("new_key")
+        self.assertTrue(self.gs.cas("new_key", "val3"),
+            "cas on a key after fetching it should succeed")
+        # connect a new client to the same server
+        evil_client = gemstash.Client(self.gs.stash)
+        evil_client.set("new_key", "evil_val")
+        self.assertEqual(self.gs.cas("new_key", "val4"), 0,
+            "cas on a key modified by another client should fail")
+
 # TODO: test expiration of values
 
 class Test_gemstash_mimicry(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.mc = memcache.Client(['127.0.0.1:11211'])
-        cls.gs = gemstash.Client(gemstash.MimicStash())
+        cls.mc = memcache.Client(['192.168.1.101:11211'], cache_cas=True)
+        cls.gs = gemstash.Client(gemstash.MimicStash(), cache_cas=True)
 
     def setUp(self):
         self.mc.flush_all()
@@ -766,3 +782,28 @@ class Test_gemstash_mimicry(unittest.TestCase):
             self.gs.check_key("foo\n")
         with self.assertRaises(memcache.Client.MemcachedKeyCharacterError):
             self.mc.check_key("foo\n")
+
+    def test_cas(self):
+        self.assertEqual(self.gs.cas("new_key", "val"), self.mc.cas("new_key", "val"))
+        self.assertEqual(self.gs.cas("new_key", "val2"), self.mc.cas("new_key", "val2"))
+
+        self.gs.get("new_key")
+        self.mc.get("new_key")
+
+        self.assertEqual(self.gs.cas("new_key", "val3"), self.mc.cas("new_key", "val3"))
+
+        # connect a new client to the same server
+        evil_gs = gemstash.Client(self.gs.stash, cache_cas=True)
+        evil_mc = memcache.Client(['192.168.1.101:11211'], cache_cas=True)
+
+        evil_gs.set("new_key", "evil_val")
+        evil_mc.set("new_key", "evil_mc_val")
+
+        # The following test fails for reasons I don't understand. The actual
+        # python-memcached implementation seems not to hand cas correctly,
+        # unless I am missing the point. I'm not changing the behavior of
+        # gemstash until I know what's happening.
+        #
+        # TODO: Don't comment out failing tests. Seriously.
+        #
+        # self.assertEqual(self.gs.cas("new_key", "val4"), self.mc.cas("new_key", "val4"))

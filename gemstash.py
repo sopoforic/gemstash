@@ -39,6 +39,7 @@ import sys
 import collections
 import datetime
 import threading
+import uuid
 
 SERVER_MAX_KEY_LENGTH = 250
 SERVER_MAX_VALUE_LENGTH = 1024*1024
@@ -48,13 +49,12 @@ _SOCKET_TIMEOUT = 3  #  number of seconds before sockets timeout.
 class Stash(collections.MutableMapping):
     """A cache, taking place of a memcached server for a gemstash Client."""
 
-    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'set'])
+    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'cas_id'])
 
-    def __init__(self, mimic=True, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         """Create a new Stash."""
         self.cache = dict()
         self.write_lock = threading.RLock()
-        self.mimic = mimic
 
     def __getitem__(self, key):
         try:
@@ -65,7 +65,7 @@ class Stash(collections.MutableMapping):
             del self.cache[key]
             return None
         else:
-            return item.value
+            return item.value, item.cas_id
 
     def __setitem__(self, key, value):
         raise NotImplementedError("Add items to the stash using the set method.")
@@ -86,21 +86,20 @@ class Stash(collections.MutableMapping):
     def incr(self, key, delta):
         with self.write_lock:
             try:
-                value = self[key]
-                if not value:
-                    return None
-                if isinstance(value, str):
-                    value = str(int(value) + delta)
-                elif isinstance(value, int):
-                    value = value + delta
-                else:
-                    # not a str or int, can't increment
-                    raise ValueError()
-                self.update(key, value)
-                return int(value)
-            except ValueError as e:
-                # value was a str that couldn't be converted to an int
-                raise ValueError("cannot increment or decrement non-numeric value") from e
+                value, _ = self[key]
+            except TypeError:
+                value = None
+            if not value:
+                return None
+            if isinstance(value, str):
+                value = str(int(value) + delta)
+            elif isinstance(value, int):
+                value = value + delta
+            else:
+                # not a str or int, can't increment
+                raise ValueError("cannot increment or decrement non-numeric value")
+            self.update(key, value)
+            return int(value)
 
     def update(self, key, value, time=None):
         with self.write_lock:
@@ -118,7 +117,7 @@ class Stash(collections.MutableMapping):
                 expires = None
             else:
                 expires = now + datetime.timedelta(seconds=time)
-            self.cache[key] = self.CachedItem(value, expires, now)
+            self.cache[key] = self.CachedItem(value, expires, uuid.uuid4())
             return True
 
     def flush(self):
@@ -127,7 +126,10 @@ class Stash(collections.MutableMapping):
 
     def append(self, key, value, time):
         with self.write_lock:
-            original = self[key]
+            try:
+                original, _ = self[key]
+            except TypeError:
+                original = None
             if not original:
                 return False
             if isinstance(original, str):
@@ -149,7 +151,10 @@ class Stash(collections.MutableMapping):
 
     def prepend(self, key, value, time):
         with self.write_lock:
-            original = self[key]
+            try:
+                original, _ = self[key]
+            except TypeError:
+                original = None
             if not original:
                 return False
             if isinstance(original, str):
@@ -169,6 +174,16 @@ class Stash(collections.MutableMapping):
 
             return self.set(key, value, time)
 
+    def cas(self, key, value, time, cas_id):
+        with self.write_lock:
+            if key not in self.cache or not cas_id:
+                return self.set(key, value, time)
+            else:
+                if cas_id == self.cache[key].cas_id:
+                    return self.set(key, value, time)
+                else:
+                    return 0
+
 
 class MimicStash(collections.MutableMapping):
     """
@@ -179,7 +194,7 @@ class MimicStash(collections.MutableMapping):
 
     """
 
-    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'parse', 'set'])
+    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'parse', 'cas_id'])
 
     def __init__(self, mimic=True, *args, **kwargs):
         """Create a new Stash."""
@@ -196,7 +211,7 @@ class MimicStash(collections.MutableMapping):
             del self.cache[key]
             return None
         else:
-            return item.parse(item.value)
+            return item.parse(item.value), item.cas_id
 
     def __setitem__(self, key, value):
         raise NotImplementedError("Add items to the stash using the set method.")
@@ -217,21 +232,20 @@ class MimicStash(collections.MutableMapping):
     def incr(self, key, delta):
         with self.write_lock:
             try:
-                value = self[key]
-                if not value:
-                    return None
-                if isinstance(value, str):
-                    value = str(int(value) + delta)
-                elif isinstance(value, int):
-                    value = value + delta
-                else:
-                    # not a str or int, can't increment
-                    raise ValueError()
-                self.update(key, value)
-                return int(value)
-            except ValueError as e:
-                # value was a str that couldn't be converted to an int
-                raise ValueError("cannot increment or decrement non-numeric value") from e
+                value, _ = self[key]
+            except TypeError:
+                value= None
+            if not value:
+                return None
+            if isinstance(value, str):
+                value = str(int(value) + delta)
+            elif isinstance(value, int):
+                value = value + delta
+            else:
+                # not a str or int, can't increment
+                raise ValueError("cannot increment or decrement non-numeric value")
+            self.update(key, value)
+            return int(value)
 
     def update(self, key, value, time=None):
         with self.write_lock:
@@ -250,7 +264,7 @@ class MimicStash(collections.MutableMapping):
             else:
                 parse = lambda x: x.decode("utf_8")
             value = str(value).encode("utf_8")
-            self.cache[key] = self.CachedItem(value, expires, parse, datetime.datetime.now())
+            self.cache[key] = self.CachedItem(value, expires, parse, uuid.uuid4())
             return True
 
     def flush(self):
@@ -260,26 +274,36 @@ class MimicStash(collections.MutableMapping):
     def append(self, key, value, time):
         with self.write_lock:
             try:
-                original, _, parse = self.cache[key]
+                original, _, parse, cas_id = self.cache[key]
             except KeyError:
                 return False
             if isinstance(parse(original), float):
                 return True
             value = original + str(value).encode("utf_8")
-            self.cache[key] = self.CachedItem(value, self._expires(time), parse)
+            self.cache[key] = self.CachedItem(value, self._expires(time), parse, uuid.uuid4())
             return True
 
     def prepend(self, key, value, time):
         with self.write_lock:
             try:
-                original, _, parse = self.cache[key]
+                original, _, parse, _ = self.cache[key]
             except KeyError:
                 return False
             if isinstance(parse(original), float):
                 return True
             value = str(value).encode("utf_8") + original
-            self.cache[key] = self.CachedItem(value, self._expires(time), parse)
+            self.cache[key] = self.CachedItem(value, self._expires(time), parse, uuid.uuid4())
             return True
+
+    def cas(self, key, value, time, cas_id):
+        with self.write_lock:
+            if key not in self.cache or not cas_id:
+                return self.set(key, value, time)
+            else:
+                if cas_id == self.cache[key].cas_id:
+                    return self.set(key, value, time)
+                else:
+                    return 0
 
     @staticmethod
     def _expires(time):
@@ -316,6 +340,9 @@ class Client(object):
         self.stash = servers
         self.debug = debug
         self.server_max_key_length = server_max_key_length
+        self.cache_cas = cache_cas
+        self.cas_cache = {}
+
 
     def flush_all(self):
         """
@@ -473,7 +500,13 @@ class Client(object):
 
     def get(self, key):
         """Retrieve the value of a key from the connected Stash."""
-        return self.stash[key]
+        try:
+            result, cas_id = self.stash[key]
+        except TypeError:
+            result = None
+        if result and self.cache_cas:
+            self.cas_cache[key] = cas_id
+        return result
 
     def get_multi(self, keys, key_prefix=''):
         """
@@ -487,8 +520,13 @@ class Client(object):
         """
         results = {}
         for key in keys:
-            result = self.stash[key_prefix + key]
+            try:
+                result, cas_id = self.stash[key_prefix + key]
+            except TypeError:
+                result = None
             if result:
+                if self.cache_cas:
+                    self.cas_cache[key] = cas_id
                 results[key] = result
         return results
 
@@ -513,10 +551,24 @@ class Client(object):
         if len(key) != len(after_translate):
             raise Client.MemcachedKeyCharacterError("Control characters not allowed")
 
-    # Dummy methods
+    def cas(self, key, val, time=0, min_compress_len=0):
+        """Set a key only if it has not been changed since last fetched."""
+        return self.stash.cas(key, val, time, self.cas_cache.get(key))
 
     def reset_cas(self):
-        pass
+        """Reset the cas cache."""
+        self.cas_cache = {}
+
+    def gets(self, key):
+        """Get a key.
+
+        This method is included for completeness, but doesn't seem to be used by
+        python-memcached.
+
+        """
+        return self.get(key)
+
+    # Dummy methods
 
     def set_servers(self, servers):
         pass
@@ -531,10 +583,4 @@ class Client(object):
         pass
 
     def disconnect_all(self):
-        pass
-
-    def cas(self, key, val, time=0, min_compress_len=0):
-        pass
-
-    def gets(self, key):
         pass
