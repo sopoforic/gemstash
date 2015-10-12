@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# Copyright 2015 Tracy Poff. See LICENSE for details.
+
 """
 Server-free memcached replacement.
 

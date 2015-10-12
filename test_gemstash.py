@@ -1,3 +1,5 @@
+# Copyright 2015 Tracy Poff. See LICENSE for details.
+
 import unittest
 
 import gemstash
