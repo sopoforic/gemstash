@@ -69,4 +69,9 @@ True
 
 ## Credits
 
-Gemstash is available under the MIT license. See LICENSE for details.
+[Gemstash](https://github.com/sopoforic/gemstash) is available under the MIT
+license. See LICENSE for details.
+
+[python-memcached](https://github.com/linsomniac/python-memcached) was
+originally written by Evan Martin is maintained by Sean Reifschneider. See the
+link for details.
