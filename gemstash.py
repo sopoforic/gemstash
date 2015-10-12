@@ -48,7 +48,7 @@ _SOCKET_TIMEOUT = 3  #  number of seconds before sockets timeout.
 class Stash(collections.MutableMapping):
     """A cache, taking place of a memcached server for a gemstash Client."""
 
-    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires'])
+    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'set'])
 
     def __init__(self, mimic=True, *args, **kwargs):
         """Create a new Stash."""
@@ -111,13 +111,14 @@ class Stash(collections.MutableMapping):
 
     def set(self, key, value, time):
         with self.write_lock:
+            now = datetime.datetime.now()
             if time and time > 60*60*24*30:
                 expires = datetime.datetime.utcfromtimestamp(time)
             elif (not time) or time == 0:
                 expires = None
             else:
-                expires = datetime.datetime.now() + datetime.timedelta(seconds=time)
-            self.cache[key] = self.CachedItem(value, expires)
+                expires = now + datetime.timedelta(seconds=time)
+            self.cache[key] = self.CachedItem(value, expires, now)
             return True
 
     def flush(self):
@@ -178,7 +179,7 @@ class MimicStash(collections.MutableMapping):
 
     """
 
-    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'parse'])
+    CachedItem = collections.namedtuple('CachedItem', ['value', 'expires', 'parse', 'set'])
 
     def __init__(self, mimic=True, *args, **kwargs):
         """Create a new Stash."""
@@ -249,7 +250,7 @@ class MimicStash(collections.MutableMapping):
             else:
                 parse = lambda x: x.decode("utf_8")
             value = str(value).encode("utf_8")
-            self.cache[key] = self.CachedItem(value, expires, parse)
+            self.cache[key] = self.CachedItem(value, expires, parse, datetime.datetime.now())
             return True
 
     def flush(self):
