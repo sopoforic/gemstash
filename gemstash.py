@@ -186,6 +186,26 @@ class Stash(collections.MutableMapping):
                 else:
                     return 0
 
+    def cleanup(self):
+        """Remove expired items from the cache.
+
+        Returns a list of keys removed.
+
+        """
+
+        removed = []
+        for key in self.cache.keys():
+            with self.write_lock:
+                try:
+                    item = self.cache[key]
+                except KeyError:
+                    # the item vanished while we weren't looking!
+                    pass
+                if item.expires and item.expires < datetime.datetime.now():
+                    del self.cache[key]
+                    removed.append(key)
+        return removed
+
 
 class MimicStash(collections.MutableMapping):
     """
@@ -306,6 +326,26 @@ class MimicStash(collections.MutableMapping):
                     return self.set(key, value, time)
                 else:
                     return 0
+
+    def cleanup(self):
+        """Remove expired items from the cache.
+
+        Returns a list of keys removed.
+
+        """
+
+        removed = []
+        for key in self.cache.keys():
+            with self.write_lock:
+                try:
+                    item = self.cache[key]
+                except KeyError:
+                    # the item vanished while we weren't looking!
+                    pass
+                if item.expires and item.expires < datetime.datetime.now():
+                    del self.cache[key]
+                    removed.append(key)
+        return removed
 
     @staticmethod
     def _expires(time):
