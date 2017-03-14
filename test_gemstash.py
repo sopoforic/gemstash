@@ -391,7 +391,8 @@ class Test_gemstash_mimicry(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.mc = memcache.Client(['192.168.1.101:11211'], cache_cas=True)
+        cls.MC_SERVER = '127.0.0.1:11211'
+        cls.mc = memcache.Client([cls.MC_SERVER], cache_cas=True)
         cls.gs = gemstash.Client(gemstash.MimicStash(), cache_cas=True)
 
     def setUp(self):
@@ -796,7 +797,7 @@ class Test_gemstash_mimicry(unittest.TestCase):
 
         # connect a new client to the same server
         evil_gs = gemstash.Client(self.gs.stash, cache_cas=True)
-        evil_mc = memcache.Client(['192.168.1.101:11211'], cache_cas=True)
+        evil_mc = memcache.Client([self.MC_SERVER], cache_cas=True)
 
         evil_gs.set("new_key", "evil_val")
         evil_mc.set("new_key", "evil_mc_val")
