@@ -767,7 +767,9 @@ class Test_gemstash_mimicry(unittest.TestCase):
             self.mc.get_multi(vals.keys(), key_prefix='pre'))
 
     def test_check_key(self):
-        self.assertEqual(self.gs.check_key("foo"), self.mc.check_key("foo"))
+        # An intentional difference from python-memcached: keys should be
+        # strings for gemstash, but bytes for memcached
+        self.assertEqual(self.gs.check_key("foo"), self.mc.check_key("foo".encode('utf_8')))
 
         with self.assertRaises(gemstash.Client.MemcachedKeyNoneError):
             self.gs.check_key(None)
