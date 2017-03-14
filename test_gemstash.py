@@ -782,11 +782,11 @@ class Test_gemstash_mimicry(unittest.TestCase):
         with self.assertRaises(gemstash.Client.MemcachedKeyLengthError):
             self.gs.check_key("FOO" * 100)
         with self.assertRaises(memcache.Client.MemcachedKeyLengthError):
-            self.mc.check_key("FOO" * 100)
+            self.mc.check_key(("FOO" * 100).encode('utf_8'))
         with self.assertRaises(gemstash.Client.MemcachedKeyCharacterError):
             self.gs.check_key("foo\n")
         with self.assertRaises(memcache.Client.MemcachedKeyCharacterError):
-            self.mc.check_key("foo\n")
+            self.mc.check_key("foo\n".encode('utf_8'))
 
     def test_cas(self):
         self.assertEqual(self.gs.cas("new_key", "val"), self.mc.cas("new_key", "val"))
